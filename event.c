@@ -183,10 +183,10 @@ event_base_new(void)
 	event_gotsig = 0;
 
 	detect_monotonic();
-	gettime(base, &base->event_tv);
+	gettime(base, &base->event_tv);//更新event_base的时间
 
-	min_heap_ctor(&base->timeheap);
-	TAILQ_INIT(&base->eventqueue);
+	min_heap_ctor(&base->timeheap); //初始化堆, 但是没有分配内存.
+	TAILQ_INIT(&base->eventqueue);  //初始化insert队列.
 	base->sig.ev_signal_pair[0] = -1;
 	base->sig.ev_signal_pair[1] = -1;
 
@@ -205,7 +205,7 @@ event_base_new(void)
 			   base->evsel->name);
 
 	/* allocate a single active event queue */
-	event_base_priority_init(base, 1);
+	event_base_priority_init(base, 1);//初始化active队列
 
 	return (base);
 }
@@ -224,7 +224,7 @@ event_base_free(struct event_base *base)
 	/* XXX(niels) - check for internal events first */
 	assert(base);
 	/* Delete all non-internal events. */
-	for (ev = TAILQ_FIRST(&base->eventqueue); ev; ) {
+	for (ev = TAILQ_FIRST(&base->eventqueue); ev; ) { //删除insert队列中的event
 		struct event *next = TAILQ_NEXT(ev, ev_next);
 		if (!(ev->ev_flags & EVLIST_INTERNAL)) {
 			event_del(ev);
@@ -232,12 +232,12 @@ event_base_free(struct event_base *base)
 		}
 		ev = next;
 	}
-	while ((ev = min_heap_top(&base->timeheap)) != NULL) {
+	while ((ev = min_heap_top(&base->timeheap)) != NULL) {  //这里min_heap_top返回的是定时堆的根节点. 因为这里的堆是数组实现的.根节点的地址就是这个数组的首地址, 所以直接析构根节点就是释放了这个堆了.
 		event_del(ev);
 		++n_deleted;
 	}
 
-	for (i = 0; i < base->nactivequeues; ++i) {
+	for (i = 0; i < base->nactivequeues; ++i) {//这里要对active队列(优先队列)重的event,全部析构.两层循环.
 		for (ev = TAILQ_FIRST(base->activequeues[i]); ev; ) {
 			struct event *next = TAILQ_NEXT(ev, ev_active_next);
 			if (!(ev->ev_flags & EVLIST_INTERNAL)) {
@@ -256,21 +256,21 @@ event_base_free(struct event_base *base)
 		base->evsel->dealloc(base, base->evbase);
 
 	for (i = 0; i < base->nactivequeues; ++i)
-		assert(TAILQ_EMPTY(base->activequeues[i]));
+		assert(TAILQ_EMPTY(base->activequeues[i])); //从这里可以看出上面dealloc函数并不负责释放active队列的内存.
 
-	assert(min_heap_empty(&base->timeheap));
-	min_heap_dtor(&base->timeheap);
+	assert(min_heap_empty(&base->timeheap));//判断base的定时最小堆中,没有event的时间了. 不然就会报错了.
+	min_heap_dtor(&base->timeheap);//释放最小堆的内存. 讲一下,这里的堆使用数组实现的,数组中元素是event*类型变量.
 
 	for (i = 0; i < base->nactivequeues; ++i)
-		free(base->activequeues[i]);
-	free(base->activequeues);
+		free(base->activequeues[i]); //从这里可以看出上面dealloc函数并不负责释放active队列的内存.这里就是释放各个优先级的队列.
+	free(base->activequeues);//因为优先队列首先是一个数组, 数组的元素是一个链表, 所以最后要释放数组.
 
-	assert(TAILQ_EMPTY(&base->eventqueue));
+	assert(TAILQ_EMPTY(&base->eventqueue));//最后在判读一次,非空报错了
 
 	free(base);
 }
 
-/* reinitialized the event base after a fork */
+/* reinitialized the event base after a fork *///重新初始化
 int
 event_reinit(struct event_base *base)
 {
@@ -295,14 +295,14 @@ event_reinit(struct event_base *base)
 		base->sig.ev_signal_added = 0;
 	}
 
-	if (base->evsel->dealloc != NULL)
+	if (base->evsel->dealloc != NULL)   //调用dealloc.
 		base->evsel->dealloc(base, base->evbase);
-	evbase = base->evbase = evsel->init(base);
+	evbase = base->evbase = evsel->init(base);//再初始化它.
 	if (base->evbase == NULL)
 		event_errx(1, "%s: could not reinitialize event mechanism",
 		    __func__);
 
-	TAILQ_FOREACH(ev, &base->eventqueue, ev_next) {
+	TAILQ_FOREACH(ev, &base->eventqueue, ev_next) {//这里又把原来base中队列中的event,重新加回来. 在这里看来evsel->dealloc和evsel->init并没有改变base中的event队列的数据.
 		if (evsel->add(evbase, ev) == -1)
 			res = -1;
 	}
