@@ -62,11 +62,11 @@ struct evepoll {
 };
 
 struct epollop {
-	struct evepoll *fds;
-	int nfds;
-	struct epoll_event *events;
-	int nevents;
-	int epfd;
+	struct evepoll *fds;        //evepoll类型的数组,初始大小为32.
+	int nfds;                   //表示fds这个数组的元素个数. 初始值为32.
+	struct epoll_event *events; //epoll_event类型的数组,提供epoll使用. 初始大小为32, 最大值为4096.
+	int nevents;                //表示events数组的大小, 初始值为32.
+	int epfd;                   //保存epoll_create函数生成的文件描述符.
 };
 
 static void *epoll_init	(struct event_base *);
@@ -117,27 +117,27 @@ epoll_init(struct event_base *base)
 		return (NULL);
 
 	/* Initalize the kernel queue */
-	if ((epfd = epoll_create(32000)) == -1) {
+	if ((epfd = epoll_create(32000)) == -1) {   //创建一个epoll的文件描述符.
 		if (errno != ENOSYS)
 			event_warn("epoll_create");
 		return (NULL);
 	}
 
-	FD_CLOSEONEXEC(epfd);
+	FD_CLOSEONEXEC(epfd);                       //设置epfd的closeOnExec属性.
 
 	if (!(epollop = calloc(1, sizeof(struct epollop))))
 		return (NULL);
 
 	epollop->epfd = epfd;
 
-	/* Initalize fields */
+	/* Initalize fields */                      //分配events的数组.注意类型是epoll_event
 	epollop->events = malloc(INITIAL_NEVENTS * sizeof(struct epoll_event));
 	if (epollop->events == NULL) {
 		free(epollop);
 		return (NULL);
 	}
 	epollop->nevents = INITIAL_NEVENTS;
-
+    //分配evepoll的数组.
 	epollop->fds = calloc(INITIAL_NFILES, sizeof(struct evepoll));
 	if (epollop->fds == NULL) {
 		free(epollop->events);
@@ -145,12 +145,12 @@ epoll_init(struct event_base *base)
 		return (NULL);
 	}
 	epollop->nfds = INITIAL_NFILES;
-
+    //这里要注意了. 初始化了信号处理的东西. 只有这个地方初始化了信号处理的东西.
 	evsignal_init(base);
 
 	return (epollop);
 }
-
+//这个函数就是负责扩展epollop中的fds数组, 也就是evepoll类型的数组.实际就是对应了libevent的处理.每次增大一倍,最大值是参数max给出的.
 static int
 epoll_recalc(struct event_base *base, void *arg, int max)
 {
@@ -189,12 +189,12 @@ epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	if (tv != NULL)
 		timeout = tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000;
 
-	if (timeout > MAX_EPOLL_TIMEOUT_MSEC) {
+	if (timeout > MAX_EPOLL_TIMEOUT_MSEC) {//epoll系统调用的等待的时间不能太长.最长35分钟
 		/* Linux kernels can wait forever if the timeout is too big;
 		 * see comment on MAX_EPOLL_TIMEOUT_MSEC. */
 		timeout = MAX_EPOLL_TIMEOUT_MSEC;
 	}
-
+    //这里epoll系统调用就开始wait了. 返回值是-1出错了, 0超时了, 或者 就绪文件描述符的个数. timeout的单位是毫秒.
 	res = epoll_wait(epollop->epfd, events, epollop->nevents, timeout);
 
 	if (res == -1) {
@@ -203,32 +203,32 @@ epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 			return (-1);
 		}
 
-		evsignal_process(base);
+		evsignal_process(base); //只要epoll_wait函数出错返回了, 就处理信号
 		return (0);
 	} else if (base->sig.evsignal_caught) {
-		evsignal_process(base);
+		evsignal_process(base); //只要信号发生了就处理信号.
 	}
 
 	event_debug(("%s: epoll_wait reports %d", __func__, res));
 
-	for (i = 0; i < res; i++) {
-		int what = events[i].events;
+	for (i = 0; i < res; i++) { //开始遍历了.
+		int what = events[i].events;    //epoll_event结构体中的events字段,表示就绪的事件类型.
 		struct event *evread = NULL, *evwrite = NULL;
 		int fd = events[i].data.fd;
 
 		if (fd < 0 || fd >= epollop->nfds)
 			continue;
-		evep = &epollop->fds[fd];
-
-		if (what & (EPOLLHUP|EPOLLERR)) {
+		evep = &epollop->fds[fd];   //从这里可以看出evepoll类型的数组fds和epoll_event类型的数组events的对应关系.可以看出这两个数组的大小并一定是相等, 因为events数组的作用是epoll_wait获得就绪的文件描述符的. 文件描述符不太可能会同一时间全部就绪.
+		//这里就可以看出, fds数组的索引就是文件描述符. 通过文件描述符, 两个数组关联.
+		if (what & (EPOLLHUP|EPOLLERR)) {   //当一个就绪文件描述符, 对应的文件描述符被挂断,对应的文件描述符出错了.设置读写事件.
 			evread = evep->evread;
 			evwrite = evep->evwrite;
 		} else {
-			if (what & EPOLLIN) {
+			if (what & EPOLLIN) {//文件描述符是读事件.
 				evread = evep->evread;
 			}
 
-			if (what & EPOLLOUT) {
+			if (what & EPOLLOUT) {//文件描述符是写事件.
 				evwrite = evep->evwrite;
 			}
 		}
@@ -236,13 +236,13 @@ epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 		if (!(evread||evwrite))
 			continue;
 
-		if (evread != NULL)
+		if (evread != NULL) //把对应的read的event结构体,插入到libevent的active队列中.
 			event_active(evread, EV_READ, 1);
 		if (evwrite != NULL)
 			event_active(evwrite, EV_WRITE, 1);
 	}
 
-	if (res == epollop->nevents && epollop->nevents < MAX_NEVENTS) {
+	if (res == epollop->nevents && epollop->nevents < MAX_NEVENTS) {    //在这里检查epoll_event类型的数组event是不是不够用了.那就扩展吧.
 		/* We used all of the event space this time.  We should
 		   be ready for more events next time. */
 		int new_nevents = epollop->nevents * 2;
@@ -274,33 +274,33 @@ epoll_add(void *arg, struct event *ev)
 	fd = ev->ev_fd;
 	if (fd >= epollop->nfds) {
 		/* Extent the file descriptor array as necessary */
-		if (epoll_recalc(ev->ev_base, epollop, fd) == -1)
+		if (epoll_recalc(ev->ev_base, epollop, fd) == -1)   //这里扩展evepoll类型数组fds的大小.因为现在出现的文件描述符超过了fds的大小.
 			return (-1);
 	}
-	evep = &epollop->fds[fd];
-	op = EPOLL_CTL_ADD;
+	evep = &epollop->fds[fd];   //先取出数组中的对应的元素.
+	op = EPOLL_CTL_ADD;         //默认的操作是EPOLL_CTL_ADD.
 	events = 0;
-	if (evep->evread != NULL) {
+	if (evep->evread != NULL) { //当evep的读或者写event不为空. 则既要保持原来的监听事件, 也要加上新的事件,所以操作要改成MOD.
 		events |= EPOLLIN;
 		op = EPOLL_CTL_MOD;
 	}
-	if (evep->evwrite != NULL) {
+	if (evep->evwrite != NULL) {    //保持原来的监听事件.
 		events |= EPOLLOUT;
 		op = EPOLL_CTL_MOD;
 	}
 
-	if (ev->ev_events & EV_READ)
+	if (ev->ev_events & EV_READ)    //开始保持新的监听事件.
 		events |= EPOLLIN;
-	if (ev->ev_events & EV_WRITE)
+	if (ev->ev_events & EV_WRITE)   //开始保持新的监听事件.
 		events |= EPOLLOUT;
 
-	epev.data.fd = fd;
-	epev.events = events;
-	if (epoll_ctl(epollop->epfd, op, ev->ev_fd, &epev) == -1)
+	epev.data.fd = fd;              //保持文件描述符
+	epev.events = events;           //保存监听事件.
+	if (epoll_ctl(epollop->epfd, op, ev->ev_fd, &epev) == -1)   //开始修改epoll的监听事件.
 			return (-1);
 
 	/* Update events responsible */
-	if (ev->ev_events & EV_READ)
+	if (ev->ev_events & EV_READ)    //这几步就是更新evepoll数组中的元素的信息. 只有epoll_ctl成功之后才更新的.不错.
 		evep->evread = ev;
 	if (ev->ev_events & EV_WRITE)
 		evep->evwrite = ev;
@@ -318,27 +318,27 @@ epoll_del(void *arg, struct event *ev)
 	int needwritedelete = 1, needreaddelete = 1;
 
 	if (ev->ev_events & EV_SIGNAL)
-		return (evsignal_del(ev));
+		return (evsignal_del(ev));  //删除对应的信号的信息.
 
 	fd = ev->ev_fd;
-	if (fd >= epollop->nfds)
+	if (fd >= epollop->nfds)        //如果这个event对应的文件描述符, 超过了关联的evepoll的数组的范围.
 		return (0);
 	evep = &epollop->fds[fd];
 
 	op = EPOLL_CTL_DEL;
 	events = 0;
 
-	if (ev->ev_events & EV_READ)
+	if (ev->ev_events & EV_READ)    //当event有读事件, 则设置events标志位.
 		events |= EPOLLIN;
-	if (ev->ev_events & EV_WRITE)
+	if (ev->ev_events & EV_WRITE)   //当event有写事件, 则设置events标志位.
 		events |= EPOLLOUT;
 
-	if ((events & (EPOLLIN|EPOLLOUT)) != (EPOLLIN|EPOLLOUT)) {
-		if ((events & EPOLLIN) && evep->evwrite != NULL) {
-			needwritedelete = 0;
-			events = EPOLLOUT;
-			op = EPOLL_CTL_MOD;
-		} else if ((events & EPOLLOUT) && evep->evread != NULL) {
+	if ((events & (EPOLLIN|EPOLLOUT)) != (EPOLLIN|EPOLLOUT)) {  //当event既监听了读又监听了写,那就可以完全删除了.
+		if ((events & EPOLLIN) && evep->evwrite != NULL) {      //如果event只监听了读事件, 但是这个event对应的fd, fd关联的evepoll结构中的writeevent 不为空, 那么就走下面语句.
+			needwritedelete = 0;    //让epoll监听写事件,不监听读事件. 不删除对应的标志位.
+			events = EPOLLOUT;      //更新event的标识位.
+			op = EPOLL_CTL_MOD;     //因为之前event已经被放置到epoll的监听队列中.所以, 操作不是EPOLL_CTL_ADD, 而是EPOLL_CTL_MOD. 把读监听改为写监听. 其实这个是一个边缘情况.
+		} else if ((events & EPOLLOUT) && evep->evread != NULL) {   //同上面类似. 也是一种边缘清空.
 			needreaddelete = 0;
 			events = EPOLLIN;
 			op = EPOLL_CTL_MOD;
@@ -347,13 +347,13 @@ epoll_del(void *arg, struct event *ev)
 
 	epev.events = events;
 	epev.data.fd = fd;
-
+    //这里对应更新对应的evepoll结构体中的数据.
 	if (needreaddelete)
 		evep->evread = NULL;
 	if (needwritedelete)
 		evep->evwrite = NULL;
-
-	if (epoll_ctl(epollop->epfd, op, fd, &epev) == -1)
+    //
+	if (epoll_ctl(epollop->epfd, op, fd, &epev) == -1)  //调用底层的API了.
 		return (-1);
 
 	return (0);
@@ -366,11 +366,11 @@ epoll_dealloc(struct event_base *base, void *arg)
 
 	evsignal_dealloc(base);
 	if (epollop->fds)
-		free(epollop->fds);
+		free(epollop->fds);     //释放epollop中的evepoll类型的结构体数组.
 	if (epollop->events)
-		free(epollop->events);
+		free(epollop->events);  //释放epollop中的epoll_event类型的结构体数组.
 	if (epollop->epfd >= 0)
-		close(epollop->epfd);
+		close(epollop->epfd);   //关闭epoll_create创建的文件描述符
 
 	memset(epollop, 0, sizeof(struct epollop));
 	free(epollop);
