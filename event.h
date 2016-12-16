@@ -126,7 +126,7 @@
   callbacks have been registered for a given URI.
 
   @section evrpc A framework for RPC servers and clients
- 
+
   libevents provides a framework for creating RPC servers and clients.  It
   takes care of marshaling and unmarshaling all data structures.
 
@@ -231,7 +231,7 @@ struct event {
 	void *ev_arg;
 
 	int ev_res;		/* result passed to event callback */
-	int ev_flags;
+	int ev_flags;   //这个标志字段表示这个event
 };
 #else
 struct event;
@@ -318,13 +318,13 @@ int event_base_dispatch(struct event_base *);
 
 /**
  Get the kernel event notification mechanism used by libevent.
- 
+
  @param eb the event_base structure returned by event_base_new()
  @return a string identifying the kernel event mechanism (kqueue, epoll, etc.)
  */
 const char *event_base_get_method(struct event_base *);
-        
-        
+
+
 /**
   Deallocate all memory associated with an event_base, and free the base.
 
@@ -724,14 +724,14 @@ int	event_priority_set(struct event *, int);
 /* These functions deal with buffering input and output */
 
 struct evbuffer {
-	u_char *buffer;
-	u_char *orig_buffer;
+	u_char *buffer;         //有效数据开始的位置
+	u_char *orig_buffer;    //真正内存的开始位置.
 
-	size_t misalign;
-	size_t totallen;
-	size_t off;
+	size_t misalign;        //orig_buffer - buffer = misalign
+	size_t totallen;        //真正内存的分配总长度.
+	size_t off;             //有效数据的长度.
 
-	void (*cb)(struct evbuffer *, size_t, size_t, void *);
+	void (*cb)(struct evbuffer *, size_t, size_t, void *);  //这个函数在evbuffer的off发生改变时就会被调用.
 	void *cbarg;
 };
 
@@ -754,7 +754,7 @@ struct event_watermark {
 #ifndef EVENT_NO_STRUCT
 struct bufferevent {
 	struct event_base *ev_base;
-
+    //一个bufferevent对应了两个event事件,对应两个evbuffer缓冲区,对应两个watermark,注意这些都是每个bufferevent所特有的特征.
 	struct event ev_read;
 	struct event ev_write;
 

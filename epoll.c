@@ -203,10 +203,10 @@ epoll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 			return (-1);
 		}
 
-		evsignal_process(base); //只要epoll_wait函数出错返回了, 就处理信号
+		evsignal_process(base); //只要epoll_wait函数出错返回了, 就处理信号event插入到active队列中
 		return (0);
 	} else if (base->sig.evsignal_caught) {
-		evsignal_process(base); //只要信号发生了就处理信号.
+		evsignal_process(base); //只要信号发生了就处理信号.就处理信号event插入到active队列中
 	}
 
 	event_debug(("%s: epoll_wait reports %d", __func__, res));
@@ -269,7 +269,7 @@ epoll_add(void *arg, struct event *ev)
 	int fd, op, events;
 
 	if (ev->ev_events & EV_SIGNAL)
-		return (evsignal_add(ev));
+		return (evsignal_add(ev));  //如果是event是信号类型的事件,就会直接插入到信号对应的消息队列中.
 
 	fd = ev->ev_fd;
 	if (fd >= epollop->nfds) {
@@ -318,7 +318,7 @@ epoll_del(void *arg, struct event *ev)
 	int needwritedelete = 1, needreaddelete = 1;
 
 	if (ev->ev_events & EV_SIGNAL)
-		return (evsignal_del(ev));  //删除对应的信号的信息.
+		return (evsignal_del(ev));  //删除对应的信号的信息.从对应信号的事件队列中删除它.
 
 	fd = ev->ev_fd;
 	if (fd >= epollop->nfds)        //如果这个event对应的文件描述符, 超过了关联的evepoll的数组的范围.

@@ -63,22 +63,22 @@
 #include "evutil.h"
 #include "log.h"
 
-struct event_base *evsignal_base = NULL;
+struct event_base *evsignal_base = NULL;        //全局变量,保存这个event_base就是专门用来处理evsignal_info中的ev_signal的.
 
-static void evsignal_handler(int sig);
+static void evsignal_handler(int sig);          //
 
 /* Callback for when the signal handler write a byte to our signaling socket */
 static void
-evsignal_cb(int fd, short what, void *arg)
+evsignal_cb(int fd, short what, void *arg)      //是用来设置ev_signal事件就绪时机调用的回调函数.
 {
-	static char signals[1];
+	static char signals[1];     //就是接受UNIX套接字发送过来的一个字节的.
 #ifdef WIN32
 	SSIZE_T n;
 #else
 	ssize_t n;
 #endif
 
-	n = recv(fd, signals, sizeof(signals), 0);
+	n = recv(fd, signals, sizeof(signals), 0);  //调用网络系统api接受一个字节,处理就绪事件.
 	if (n == -1)
 		event_err(1, "%s: read", __func__);
 }
@@ -91,16 +91,16 @@ evsignal_cb(int fd, short what, void *arg)
 #else
 #define FD_CLOSEONEXEC(x)
 #endif
-
+//信号初始化函数,其实初始化一个base中的数据!!!也就是base中的sig字段.因此,不需要讲evsignal_info与event_base关联起来.因为本事就是关联这的.
 int
-evsignal_init(struct event_base *base)
+evsignal_init(struct event_base *base)  //该函数是在epoll_init等函数中调用的.
 {
 	int i;
 
-	/* 
+	/*
 	 * Our signal handler is going to write to one end of the socket
 	 * pair to wake up our event loop.  The event loop then scans for
-	 * signals that got delivered.
+	 * signals that got delivered.创建UNIX套接字,更新event_base中的evsinal_info字段的ev_signal_pair字段.
 	 */
 	if (evutil_socketpair(
 		    AF_UNIX, SOCK_STREAM, 0, base->sig.ev_signal_pair) == -1) {
@@ -114,22 +114,22 @@ evsignal_init(struct event_base *base)
 		return -1;
 	}
 
-	FD_CLOSEONEXEC(base->sig.ev_signal_pair[0]);
+	FD_CLOSEONEXEC(base->sig.ev_signal_pair[0]);//设置了exec 关闭的标识位.
 	FD_CLOSEONEXEC(base->sig.ev_signal_pair[1]);
 	base->sig.sh_old = NULL;
-	base->sig.sh_old_max = 0;
+	base->sig.sh_old_max = 0;                   //这个参数不知道是干甚的
 	base->sig.evsignal_caught = 0;
-	memset(&base->sig.evsigcaught, 0, sizeof(sig_atomic_t)*NSIG);
+	memset(&base->sig.evsigcaught, 0, sizeof(sig_atomic_t)*NSIG);   //这evsigcaught数组,这个数组的作用就是记录每种信号,发生的次数.
 	/* initialize the queues for all events */
-	for (i = 0; i < NSIG; ++i)
+	for (i = 0; i < NSIG; ++i)      //这里就是初始化evsigevents数组.数组中元素就是保存发生了某种信号的event事件,这些事件串联形成链表.
 		TAILQ_INIT(&base->sig.evsigevents[i]);
 
-        evutil_make_socket_nonblocking(base->sig.ev_signal_pair[0]);
+        evutil_make_socket_nonblocking(base->sig.ev_signal_pair[0]);//设置非阻塞.
 
-	event_set(&base->sig.ev_signal, base->sig.ev_signal_pair[1],
+	event_set(&base->sig.ev_signal, base->sig.ev_signal_pair[1],    //这里就是初始化ev_signal这个event的结构体.但是还没有注册到event_base.
 		EV_READ | EV_PERSIST, evsignal_cb, &base->sig.ev_signal);
-	base->sig.ev_signal.ev_base = base;
-	base->sig.ev_signal.ev_flags |= EVLIST_INTERNAL;
+	base->sig.ev_signal.ev_base = base; //这里就是将ev_signal反向关联到event_base上.
+	base->sig.ev_signal.ev_flags |= EVLIST_INTERNAL;//这里为什么先要设置标志位, 在还没有注册到event_base上的时候.
 
 	return 0;
 }
@@ -138,7 +138,7 @@ evsignal_init(struct event_base *base)
  * we can restore the original handler when we clear the current one. */
 int
 _evsignal_set_handler(struct event_base *base,
-		      int evsignal, void (*handler)(int))
+		      int evsignal, void (*handler)(int))//这个函数就是设置新handler,保存旧的handler.新的handler始终是下面定义的evsignal_handler函数
 {
 #ifdef HAVE_SIGACTION
 	struct sigaction sa;
@@ -152,32 +152,32 @@ _evsignal_set_handler(struct event_base *base,
 	 * resize saved signal handler array up to the highest signal number.
 	 * a dynamic array is used to keep footprint on the low side.
 	 */
-	if (evsignal >= sig->sh_old_max) {
+	if (evsignal >= sig->sh_old_max) {  //遇到一个信号,该信号的编号大于之前遇到的所有的信号的编号.
 		int new_max = evsignal + 1;
 		event_debug(("%s: evsignal (%d) >= sh_old_max (%d), resizing",
 			    __func__, evsignal, sig->sh_old_max));
-		p = realloc(sig->sh_old, new_max * sizeof(*sig->sh_old));
+		p = realloc(sig->sh_old, new_max * sizeof(*sig->sh_old));   //这里realloc使用新变量p保存realloc的返回值,这样做就是为了当realloc出错之后,旧的内存无法释放的bug.
 		if (p == NULL) {
 			event_warn("realloc");
 			return (-1);
 		}
-
+        //这里就是初始化新的部分.看来realloc函数是复制之前的数据到新的内存中,同时自动释放内存.
 		memset((char *)p + sig->sh_old_max * sizeof(*sig->sh_old),
 		    0, (new_max - sig->sh_old_max) * sizeof(*sig->sh_old));
 
 		sig->sh_old_max = new_max;
 		sig->sh_old = p;
 	}
-
+    //这里使用到了二级指针,所以有点难理解.其实就是类比二维数组的实现.这里只是子数组只有一个元素的情况.因为子数组只有一个元素,所以很怪呀.
 	/* allocate space for previous handler out of dynamic array */
-	sig->sh_old[evsignal] = malloc(sizeof *sig->sh_old[evsignal]);
+	sig->sh_old[evsignal] = malloc(sizeof *sig->sh_old[evsignal]); //在这里分配sh_old数组的内存. sh_old数组的元素是函数指针的二级指针.所以sh_old[evsignal]是
 	if (sig->sh_old[evsignal] == NULL) {
 		event_warn("malloc");
 		return (-1);
 	}
 
 	/* save previous handler and setup new handler */
-#ifdef HAVE_SIGACTION
+#ifdef HAVE_SIGACTION   //支持sigaction函数时,就是开始初始化sigaction结构体.之后设置新的handler,同时保持旧的handler.
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = handler;
 	sa.sa_flags |= SA_RESTART;
@@ -196,12 +196,12 @@ _evsignal_set_handler(struct event_base *base,
 		sig->sh_old[evsignal] = NULL;
 		return (-1);
 	}
-	*sig->sh_old[evsignal] = sh;
+	*sig->sh_old[evsignal] = sh;//这里就是保存了旧的handler
 #endif
 
 	return (0);
 }
-
+//就是发生了某种信号的事件event,然后这个函数就是负责将这个event插入到evsignal_info的ev_singal字段对应event队列中.
 int
 evsignal_add(struct event *ev)
 {
@@ -213,28 +213,28 @@ evsignal_add(struct event *ev)
 		event_errx(1, "%s: EV_SIGNAL incompatible use", __func__);
 	evsignal = EVENT_SIGNAL(ev);
 	assert(evsignal >= 0 && evsignal < NSIG);
-	if (TAILQ_EMPTY(&sig->evsigevents[evsignal])) {
+	if (TAILQ_EMPTY(&sig->evsigevents[evsignal])) { //如果对应信号队列为空,则就说明要设置新的handler,同时分配sh_old[signo]的内存.
 		event_debug(("%s: %p: changing signal handler", __func__, ev));
 		if (_evsignal_set_handler(
-			    base, evsignal, evsignal_handler) == -1)
+			    base, evsignal, evsignal_handler) == -1) //注意这里就是设置新handler,保存旧的handler.
 			return (-1);
 
 		/* catch signals if they happen quickly */
 		evsignal_base = base;
 
 		if (!sig->ev_signal_added) {
-			if (event_add(&sig->ev_signal, NULL))
+			if (event_add(&sig->ev_signal, NULL))   //如果没有将ev_signal增加到event_base上时,就添加到event_base;
 				return (-1);
 			sig->ev_signal_added = 1;
 		}
 	}
 
 	/* multiple events may listen to the same signal */
-	TAILQ_INSERT_TAIL(&sig->evsigevents[evsignal], ev, ev_signal_next);
+	TAILQ_INSERT_TAIL(&sig->evsigevents[evsignal], ev, ev_signal_next);//这里就是插入event到队列中.
 
 	return (0);
 }
-
+//这个函数发生在某个信号的发生event队列已经为空了.所以就需要将原来的handler还原回去.
 int
 _evsignal_restore_handler(struct event_base *base, int evsignal)
 {
@@ -264,7 +264,7 @@ _evsignal_restore_handler(struct event_base *base, int evsignal)
 
 	return ret;
 }
-
+//这个函数就是负责删除evsigevents中的event.
 int
 evsignal_del(struct event *ev)
 {
@@ -275,16 +275,16 @@ evsignal_del(struct event *ev)
 	assert(evsignal >= 0 && evsignal < NSIG);
 
 	/* multiple events may listen to the same signal */
-	TAILQ_REMOVE(&sig->evsigevents[evsignal], ev, ev_signal_next);
+	TAILQ_REMOVE(&sig->evsigevents[evsignal], ev, ev_signal_next);//在event列表中,删除指定的event.
 
-	if (!TAILQ_EMPTY(&sig->evsigevents[evsignal]))
+	if (!TAILQ_EMPTY(&sig->evsigevents[evsignal]))  //如果不为空,就不走下面的步骤了.
 		return (0);
 
 	event_debug(("%s: %p: restoring signal handler", __func__, ev));
 
-	return (_evsignal_restore_handler(ev->ev_base, EVENT_SIGNAL(ev)));
+	return (_evsignal_restore_handler(ev->ev_base, EVENT_SIGNAL(ev))); //如果对应的队列为空了.那就恢复原来的信号处理程序.
 }
-
+//这个函数就是在evsignal_info中sig信号的事件队列为空情况下, 该信号的event发生时,框架为每个信号设置的新的信号处理程序.
 static void
 evsignal_handler(int sig)
 {
@@ -305,7 +305,7 @@ evsignal_handler(int sig)
 #endif
 
 	/* Wake up our notification mechanism */
-	send(evsignal_base->sig.ev_signal_pair[0], "a", 1, 0);
+	send(evsignal_base->sig.ev_signal_pair[0], "a", 1, 0); //发送一个字符, 用来唤醒ev_signal的event事件,所以框架就可以开始处理所有就绪事件了.
 	errno = save_errno;
 }
 
@@ -316,9 +316,9 @@ evsignal_process(struct event_base *base)
 	struct event *ev, *next_ev;
 	sig_atomic_t ncalls;
 	int i;
-	
+
 	base->sig.evsignal_caught = 0;
-	for (i = 1; i < NSIG; ++i) {
+	for (i = 1; i < NSIG; ++i) {    //遍历所有的信号处理程序的链表.将所有信号event,都加入到event_base的active队列中去.
 		ncalls = sig->evsigcaught[i];
 		if (ncalls == 0)
 			continue;
@@ -327,14 +327,14 @@ evsignal_process(struct event_base *base)
 		for (ev = TAILQ_FIRST(&sig->evsigevents[i]);
 		    ev != NULL; ev = next_ev) {
 			next_ev = TAILQ_NEXT(ev, ev_signal_next);
-			if (!(ev->ev_events & EV_PERSIST))
+			if (!(ev->ev_events & EV_PERSIST))  //不是EV_PERSIST就先要在insert队列,active队列,定时最小堆上面先删除它,然后再加入到就绪队列中去.
 				event_del(ev);
 			event_active(ev, EV_SIGNAL, ncalls);
 		}
 
 	}
 }
-
+//函数就是负责销毁evsignal_info对象.
 void
 evsignal_dealloc(struct event_base *base)
 {

@@ -70,9 +70,9 @@ struct evbuffer *
 evbuffer_new(void)
 {
 	struct evbuffer *buffer;
-	
+	//calloc函数会自动将分配的内存中所有字节只为0,不需要人为初始化.
 	buffer = calloc(1, sizeof(struct evbuffer));
-
+    //注意这里的calloc函数并没有分配底层的内存,只是分配了evbuffer的控制字段的内存.
 	return (buffer);
 }
 
@@ -80,11 +80,11 @@ void
 evbuffer_free(struct evbuffer *buffer)
 {
 	if (buffer->orig_buffer != NULL)
-		free(buffer->orig_buffer);
-	free(buffer);
+		free(buffer->orig_buffer);//释放底层内存.
+	free(buffer); //evbuffer内存.
 }
 
-/* 
+/*
  * This is a destructive add.  The data from one buffer moves into
  * the other buffer.
  */
@@ -96,7 +96,7 @@ evbuffer_free(struct evbuffer *buffer)
 	(x)->totallen = (y)->totallen; \
 	(x)->off = (y)->off; \
 } while (0)
-
+//这个函数的作用就是将inbuf中的数据复制到outbuf中去,最后清空inbuf中的数据.
 int
 evbuffer_add_buffer(struct evbuffer *outbuf, struct evbuffer *inbuf)
 {
@@ -112,16 +112,16 @@ evbuffer_add_buffer(struct evbuffer *outbuf, struct evbuffer *inbuf)
 		SWAP(outbuf, inbuf);
 		SWAP(inbuf, &tmp);
 
-		/* 
+		/*
 		 * Optimization comes with a price; we need to notify the
 		 * buffer if necessary of the changes. oldoff is the amount
 		 * of data that we transfered from inbuf to outbuf
 		 */
 		if (inbuf->off != oldoff && inbuf->cb != NULL)
-			(*inbuf->cb)(inbuf, oldoff, inbuf->off, inbuf->cbarg);
+			(*inbuf->cb)(inbuf, oldoff, inbuf->off, inbuf->cbarg); //如果inbuf的off变了,那就会调用回调函数.
 		if (oldoff && outbuf->cb != NULL)
-			(*outbuf->cb)(outbuf, 0, oldoff, outbuf->cbarg);
-		
+			(*outbuf->cb)(outbuf, 0, oldoff, outbuf->cbarg); //如果oldoff变了,那就调用回调函数.
+
 		return (0);
 	}
 
@@ -189,7 +189,7 @@ evbuffer_add_printf(struct evbuffer *buf, const char *fmt, ...)
 }
 
 /* Reads data from an event buffer and drains the bytes read */
-
+//从buf中将数据读到data上,然后更新buf的标识位.
 int
 evbuffer_remove(struct evbuffer *buf, void *data, size_t datlen)
 {
@@ -199,7 +199,7 @@ evbuffer_remove(struct evbuffer *buf, void *data, size_t datlen)
 
 	memcpy(data, buf->buffer, nread);
 	evbuffer_drain(buf, nread);
-	
+
 	return (nread);
 }
 
@@ -207,7 +207,7 @@ evbuffer_remove(struct evbuffer *buf, void *data, size_t datlen)
  * Reads a line terminated by either '\r\n', '\n\r' or '\r' or '\n'.
  * The returned buffer needs to be freed by the called.
  */
-
+//读一行数据.函数自动将'\r'和'\n'清除了.
 char *
 evbuffer_readline(struct evbuffer *buffer)
 {
@@ -249,7 +249,7 @@ evbuffer_readline(struct evbuffer *buffer)
 	return (line);
 }
 
-
+//函数上面的函数不同的就是, 分成了三种标识终止一行的形式.
 char *
 evbuffer_readln(struct evbuffer *buffer, size_t *n_read_out,
 		enum evbuffer_eol_style eol_style)
@@ -382,7 +382,7 @@ evbuffer_expand(struct evbuffer *buf, size_t datlen)
 
 	return (0);
 }
-
+//函数就是将data的字符串复制到evbuffer类型的buf中.函数自动进行扩展.另外不修改buffer有效数据的起始位置.
 int
 evbuffer_add(struct evbuffer *buf, const void *data, size_t datlen)
 {
@@ -402,12 +402,12 @@ evbuffer_add(struct evbuffer *buf, const void *data, size_t datlen)
 
 	return (0);
 }
-
+//函数就是将buf中的标志位都更新, 就是用来表示已经消费了len长度的数据.
 void
 evbuffer_drain(struct evbuffer *buf, size_t len)
 {
 	size_t oldoff = buf->off;
-
+    //当消费数据的长度大于了buf中的数据长度.那么就直接清空buf的标识位.
 	if (len >= buf->off) {
 		buf->off = 0;
 		buf->buffer = buf->orig_buffer;
@@ -432,7 +432,7 @@ evbuffer_drain(struct evbuffer *buf, size_t len)
  */
 
 #define EVBUFFER_MAX_READ	4096
-
+//就是从文件描述符fd中读出howmuch个字节的数据, 保存到buf中.
 int
 evbuffer_read(struct evbuffer *buf, int fd, int howmuch)
 {
@@ -461,7 +461,7 @@ evbuffer_read(struct evbuffer *buf, int fd, int howmuch)
 		if (n < EVBUFFER_MAX_READ)
 			n = EVBUFFER_MAX_READ;
 	}
-#endif	
+#endif
 	if (howmuch < 0 || howmuch > n)
 		howmuch = n;
 
@@ -478,9 +478,9 @@ evbuffer_read(struct evbuffer *buf, int fd, int howmuch)
 	n = recv(fd, p, howmuch, 0);
 #endif
 	if (n == -1)
-		return (-1);
+		return (-1);//出错了.
 	if (n == 0)
-		return (0);
+		return (0);//读到文件描述符的尾部.
 
 	buf->off += n;
 
@@ -490,7 +490,7 @@ evbuffer_read(struct evbuffer *buf, int fd, int howmuch)
 
 	return (n);
 }
-
+//函数就是将buffer中的所有数据写入到文件描述符fd中.
 int
 evbuffer_write(struct evbuffer *buffer, int fd)
 {
@@ -509,7 +509,7 @@ evbuffer_write(struct evbuffer *buffer, int fd)
 
 	return (n);
 }
-
+//函数就是查找参数what指向的长度为len的数据是否,保存在buffer中.
 u_char *
 evbuffer_find(struct evbuffer *buffer, const u_char *what, size_t len)
 {
@@ -527,7 +527,7 @@ evbuffer_find(struct evbuffer *buffer, const u_char *what, size_t len)
 
 	return (NULL);
 }
-
+//设置buffer中的回调函数.
 void evbuffer_setcb(struct evbuffer *buffer,
     void (*cb)(struct evbuffer *, size_t, size_t, void *),
     void *cbarg)

@@ -194,7 +194,7 @@ event_base_new(void)
 	for (i = 0; eventops[i] && !base->evbase; i++) {
 		base->evsel = eventops[i];
 
-		base->evbase = base->evsel->init(base);
+		base->evbase = base->evsel->init(base); //当创建一个event_base时,就会调用每个网络调用的init函数.
 	}
 
 	if (base->evbase == NULL)
@@ -218,7 +218,7 @@ event_base_free(struct event_base *base)
 
 	if (base == NULL && current_base)
 		base = current_base;
-	if (base == current_base)
+	if (base == current_base)           //当base就是current_base, 那么就要将全局变量current_base先设置为null.这样后面只需要处理base这个变量了.
 		current_base = NULL;
 
 	/* XXX(niels) - check for internal events first */
@@ -227,7 +227,7 @@ event_base_free(struct event_base *base)
 	for (ev = TAILQ_FIRST(&base->eventqueue); ev; ) { //删除insert队列中的event
 		struct event *next = TAILQ_NEXT(ev, ev_next);
 		if (!(ev->ev_flags & EVLIST_INTERNAL)) {
-			event_del(ev);
+			event_del(ev);  //注意这里,删除关于event的所有记录.包括各个队列中的event的副本,和网络API监听的对应部分.
 			++n_deleted;
 		}
 		ev = next;
@@ -237,7 +237,7 @@ event_base_free(struct event_base *base)
 		++n_deleted;
 	}
 
-	for (i = 0; i < base->nactivequeues; ++i) {//这里要对active队列(优先队列)重的event,全部析构.两层循环.
+	for (i = 0; i < base->nactivequeues; ++i) {             //这里要对active队列(优先队列)中的event,全部析构.两层循环.
 		for (ev = TAILQ_FIRST(base->activequeues[i]); ev; ) {
 			struct event *next = TAILQ_NEXT(ev, ev_active_next);
 			if (!(ev->ev_flags & EVLIST_INTERNAL)) {
@@ -284,18 +284,18 @@ event_reinit(struct event_base *base)
 		return (0);
 
 	/* prevent internal delete */
-	if (base->sig.ev_signal_added) {
+	if (base->sig.ev_signal_added) {    //如果该event_base对象已经设置了信号处理程序.那么就要清除信号signal_ev事件.
 		/* we cannot call event_del here because the base has
 		 * not been reinitialized yet. */
-		event_queue_remove(base, &base->sig.ev_signal,
+		event_queue_remove(base, &base->sig.ev_signal,      //这里将在inserted队列中的信号处理部分的那个专属event删除, 也就是evsignal_info的ev_signal字段.
 		    EVLIST_INSERTED);
-		if (base->sig.ev_signal.ev_flags & EVLIST_ACTIVE)
+		if (base->sig.ev_signal.ev_flags & EVLIST_ACTIVE)   //在active队列中删除指定event.
 			event_queue_remove(base, &base->sig.ev_signal,
 			    EVLIST_ACTIVE);
-		base->sig.ev_signal_added = 0;
+		base->sig.ev_signal_added = 0;                      //设置标志位,表示event_base中的sigevent_info的ev_signal的event, 没有注册到event_base上.
 	}
 
-	if (base->evsel->dealloc != NULL)   //调用dealloc.
+	if (base->evsel->dealloc != NULL)   //调用dealloc.这里调用的底层网络API的销毁函数.例如在epoll_dealloc函数中, 就是销毁epollop结构体的所有资源.
 		base->evsel->dealloc(base, base->evbase);
 	evbase = base->evbase = evsel->init(base);//再初始化它.
 	if (base->evbase == NULL)
@@ -309,7 +309,7 @@ event_reinit(struct event_base *base)
 
 	return (res);
 }
-
+//初始化base的active队列. 主要是生成active队里的内存部分.
 int
 event_priority_init(int npriorities)
 {
@@ -321,7 +321,7 @@ event_base_priority_init(struct event_base *base, int npriorities)
 {
 	int i;
 
-	if (base->event_count_active)
+	if (base->event_count_active)           //当event_base中还有active的event时.
 		return (-1);
 
 	if (npriorities == base->nactivequeues)
@@ -329,9 +329,9 @@ event_base_priority_init(struct event_base *base, int npriorities)
 
 	if (base->nactivequeues) {
 		for (i = 0; i < base->nactivequeues; ++i) {
-			free(base->activequeues[i]);
+			free(base->activequeues[i]);        //销毁优先队列active中各个队列.
 		}
-		free(base->activequeues);
+		free(base->activequeues);       //销毁优先队列active.
 	}
 
 	/* Allocate our priority queues */
@@ -483,8 +483,8 @@ event_base_loop(struct event_base *base, int flags)
 	/* clear time cache */
 	base->tv_cache.tv_sec = 0;
 
-	if (base->sig.ev_signal_added)
-		evsignal_base = base;
+	if (base->sig.ev_signal_added)  //当event_base的evsignal_info的ev_signal已经添加到了event_base中
+		evsignal_base = base;   //则更新evsignal_base等于base;
 	done = 0;
 	while (!done) { //当event_base对象是一次运行的那种情况, 就会使用到done变量, 进行终止loop操作.
 		/* Terminate the loop if we have been asked to */
@@ -519,7 +519,7 @@ event_base_loop(struct event_base *base, int flags)
 			/*
 			 * if we have active events, we just poll new events
 			 * without waiting.
-			 *///
+			 */
 			evutil_timerclear(&tv);//清空tv之前保存的当前时间. 目前的状态是:base的active队列没有事件了 或者 flags参数显示非阻塞状态.
 		}
 
@@ -534,15 +534,15 @@ event_base_loop(struct event_base *base, int flags)
 
 		/* clear time cache */
 		base->tv_cache.tv_sec = 0;//清空时间的缓存.
-
+        //下面的函数调用将所有的就绪IO相关的event, 全部插入到active队列中.
 		res = evsel->dispatch(base, evbase, tv_p);  //调动真正的select epoll poll等函数的时候.这个语句返回的时候, 就是表明有事件已经就绪了, 或者已经经过了tv_p的时间段.
 
 		if (res == -1)  //这些底层网络api调用失败就返回了.
 			return (-1);
 		gettime(base, &base->tv_cache); //现在设置时间的缓存, 为当前时间. 从这里的代码可以看出, base->event_tv保持的是调用网络api之前的时间, base->cache保存的是调用网络api之后的时间.
-
+        //这个函数调用就是将所有的定时任务的event插入到active队列中去.
 		timeout_process(base);  //这个函数就是遍历定时任务堆,将到期的event插入到active列表中.
-
+        //下面就开始执行active队列中的event对应的回调函数了.就是处理就绪事件了.
 		if (base->event_count_active) { //如果active队列中有event
 			event_process_active(base); //这里就开始遍历active队列了. 根据active中的event优先级进行调用注册的回调函数. 所以调用定时任务的时机是, 网络api返回的时候
 			if (!base->event_count_active && (flags & EVLOOP_ONCE)) //这里再次判断, 是不是一次运行的, active中有没有event事件,函数返回.
@@ -604,10 +604,10 @@ event_base_once(struct event_base *base, int fd, short events,
 
 	eonce->cb = callback;
 	eonce->arg = arg;
-
+    //只能处理简单的定时任务或者读写event
 	if (events == EV_TIMEOUT) { //单纯的定时event.
 		if (tv == NULL) {
-			evutil_timerclear(&etv); //清空etv的字段
+			evutil_timerclear(&etv); //清空etv的字段,这里表示事件立即生效!
 			tv = &etv;
 		}
 
@@ -622,9 +622,9 @@ event_base_once(struct event_base *base, int fd, short events,
 		return (-1);
 	}
 
-	res = event_base_set(base, &eonce->ev); //将event关联的base上.
+	res = event_base_set(base, &eonce->ev); //将event关联到base上.
 	if (res == 0)
-		res = event_add(&eonce->ev, tv);//将event安装到这个base上, 如果tv参数为null, 应该马上到期, 进入Active队列中.
+		res = event_add(&eonce->ev, tv);//将event注册到这个base上, 如果tv参数为null, 应该马上到期, 进入Active队列中.
 	if (res != 0) {
 		free(eonce);
 		return (res);
@@ -690,9 +690,9 @@ event_priority_set(struct event *ev, int pri)
 /*
  * Checks if a specific event is pending or scheduled.
  */
-//函数就是拿一个参数event, 与当前event事件进行比较.得出一个event的特征.
+//函数就是拿一个参数event, 与当前event事件进行比较.得出一个event的特征.包括是否插入到insert队列,active队列,超时最小堆, 并且包括event是否关注timeout,read,write,signal四种事件.
 int
-event_pending(struct event *ev, short event, struct timeval *tv)
+event_pending(struct event *ev, short event, struct timeval *tv) //如果event关注了Timeout事件时,tv参数返回到期的时间,这个时间是绝对时间.
 {
 	struct timeval	now, res;
 	int flags = 0;
@@ -921,7 +921,7 @@ timeout_correct(struct event_base *base, struct timeval *tv)
 	/* Now remember what the new time turned out to be. */
 	base->event_tv = *tv;
 }
-//这个函数就是对base,进行检查小根堆的时间event, 只要找到到期的event, 然后插入到Active队列中.
+//这个函数就是对base,进行检查小根堆的时间event, 只要找到到期的event, 然后,在所有队列中删除, 最后插入到Active队列中.
 void
 timeout_process(struct event_base *base)
 {
@@ -938,7 +938,7 @@ timeout_process(struct event_base *base)
 			break;
 
 		/* delete this event from the I/O queues */
-		event_del(ev);//然后从对应的队列中删除这个event
+		event_del(ev);//然后从对应的队列中删除这个event. 注意这里删除定时最小堆中的元素, 最小堆会自动调整保持顺序.
 
 		event_debug(("timeout_process: call %p",
 			 ev->ev_callback));

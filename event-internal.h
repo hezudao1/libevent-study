@@ -48,7 +48,7 @@ struct eventop {
 
 struct event_base {
 	const struct eventop *evsel;
-	void *evbase;
+	void *evbase;           //这个指针保存网络操作的结构体的地址, 例如如果使用epoll, 那么这个指针就保存着一个epollop的地址.
 	int event_count;		/* counts number of total events */
 	int event_count_active;	/* counts number of active events */
 
