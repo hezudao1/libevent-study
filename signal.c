@@ -117,8 +117,8 @@ evsignal_init(struct event_base *base)  //该函数是在epoll_init等函数中调用的.
 	FD_CLOSEONEXEC(base->sig.ev_signal_pair[0]);//设置了exec 关闭的标识位.
 	FD_CLOSEONEXEC(base->sig.ev_signal_pair[1]);
 	base->sig.sh_old = NULL;
-	base->sig.sh_old_max = 0;                   //这个参数不知道是干甚的
-	base->sig.evsignal_caught = 0;
+	base->sig.sh_old_max = 0;                   //这个参数记录遇到过的信号的编号的最大值.
+	base->sig.evsignal_caught = 0;              //表示是否发生过信号.
 	memset(&base->sig.evsigcaught, 0, sizeof(sig_atomic_t)*NSIG);   //这evsigcaught数组,这个数组的作用就是记录每种信号,发生的次数.
 	/* initialize the queues for all events */
 	for (i = 0; i < NSIG; ++i)      //这里就是初始化evsigevents数组.数组中元素就是保存发生了某种信号的event事件,这些事件串联形成链表.
@@ -204,12 +204,12 @@ _evsignal_set_handler(struct event_base *base,
 //就是发生了某种信号的事件event,然后这个函数就是负责将这个event插入到evsignal_info的ev_singal字段对应event队列中.
 int
 evsignal_add(struct event *ev)
-{
-	int evsignal;
-	struct event_base *base = ev->ev_base;
-	struct evsignal_info *sig = &ev->ev_base->sig;
+{//这个函数的调用是在网络API中的xxx_add函数中,例如epoll_add.所以就是信号相关的event会与其event一样插入到insert队列.
+	int evsignal;//但是不会插入到active队列和定时最小堆中.为什么不加入到active队列中,因为没有必要.信号处理没有优先级的功能,没有时间上的要求.
+	struct event_base *base = ev->ev_base;//因为信号没有关注的文件描述符,所以不会真正加入到网络API监听
+	struct evsignal_info *sig = &ev->ev_base->sig;//处理信号事件的时机也是epoll_dispatch中的epoll_wait返回的时候,不管任何情况, 框架吧所有的信号事件全部处理了.
 
-	if (ev->ev_events & (EV_READ|EV_WRITE))
+	if (ev->ev_events & (EV_READ|EV_WRITE)) //看来evsigevents中保存的event不能是对写事件.
 		event_errx(1, "%s: EV_SIGNAL incompatible use", __func__);
 	evsignal = EVENT_SIGNAL(ev);
 	assert(evsignal >= 0 && evsignal < NSIG);
@@ -298,7 +298,7 @@ evsignal_handler(int sig)
 	}
 
 	evsignal_base->sig.evsigcaught[sig]++;
-	evsignal_base->sig.evsignal_caught = 1;
+	evsignal_base->sig.evsignal_caught = 1;//这里就是设置了evsignal_caught的地方.
 
 #ifndef HAVE_SIGACTION
 	signal(sig, evsignal_handler);
@@ -308,7 +308,7 @@ evsignal_handler(int sig)
 	send(evsignal_base->sig.ev_signal_pair[0], "a", 1, 0); //发送一个字符, 用来唤醒ev_signal的event事件,所以框架就可以开始处理所有就绪事件了.
 	errno = save_errno;
 }
-
+//该函数处理所有的信号的队列中的所有event. 也就是调用所有的回调函数.
 void
 evsignal_process(struct event_base *base)
 {
@@ -320,16 +320,16 @@ evsignal_process(struct event_base *base)
 	base->sig.evsignal_caught = 0;
 	for (i = 1; i < NSIG; ++i) {    //遍历所有的信号处理程序的链表.将所有信号event,都加入到event_base的active队列中去.
 		ncalls = sig->evsigcaught[i];
-		if (ncalls == 0)
+		if (ncalls == 0)    //如果编号为i的信号没有发生了.那么continue了.
 			continue;
-		sig->evsigcaught[i] -= ncalls;
+		sig->evsigcaught[i] -= ncalls;  //更新字段
 
 		for (ev = TAILQ_FIRST(&sig->evsigevents[i]);
 		    ev != NULL; ev = next_ev) {
 			next_ev = TAILQ_NEXT(ev, ev_signal_next);
 			if (!(ev->ev_events & EV_PERSIST))  //不是EV_PERSIST就先要在insert队列,active队列,定时最小堆上面先删除它,然后再加入到就绪队列中去.
-				event_del(ev);
-			event_active(ev, EV_SIGNAL, ncalls);
+				event_del(ev);  //如果不是持久事件,就直接干掉这个event对象.然后
+			event_active(ev, EV_SIGNAL, ncalls);//这里讲event插入到active队列中.注意这个信号发生了多次,那么对应所有的event的回调函数全部都要被调用ncalls次.
 		}
 
 	}

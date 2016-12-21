@@ -65,14 +65,14 @@ bufferevent_add(struct event *ev, int timeout)
 		ptv = &tv;
 	}
 
-	return (event_add(ev, ptv));
+	return (event_add(ev, ptv));    //注册到框架中.
 }
 
 /*
  * This callback is executed when the size of the input buffer changes.
  * We use it to apply back pressure on the reading side.
  */
-
+//这个函数是回调函数.设置这个函数当做回调的ev_read事件,首先在框架上注销了. 当框架再次往ev_read事件对应的input写数据, 那么就会调用这个函数,这个函数就是将这个ev_read事件再次注册到框架中.
 void
 bufferevent_read_pressure_cb(struct evbuffer *buf, size_t old, size_t now,
     void *arg) {
@@ -91,8 +91,8 @@ bufferevent_read_pressure_cb(struct evbuffer *buf, size_t old, size_t now,
 //这个函数是bufferevent类型中ev_read这个event实例的回调函数.这个函数就说:当ev_read就绪之后被处理时,会调用这个函数.
 static void
 bufferevent_readcb(int fd, short event, void *arg) //arg的类型竟然是bufferevent
-{//这个函数的作用,就是当ev_read就绪之后,将从ev_read关联的文件描述符中读取数据,保存到同一个bufferevent结构体中的evbuffer类型的input实例中.然后再讲ev_read的事件注册到框架中去.
-	struct bufferevent *bufev = arg;
+{//这个函数的作用,就是当ev_read就绪之后,将从ev_read关联的文件描述符中读取数据,保存到同一个bufferevent结构体中的evbuffer类型的input实例中.
+	struct bufferevent *bufev = arg;    //然后再将ev_read的事件注册到框架中去.
 	int res = 0;
 	short what = EVBUFFER_READ;
 	size_t len;
@@ -112,7 +112,7 @@ bufferevent_readcb(int fd, short event, void *arg) //arg的类型竟然是bufferevent
 		/* we might have lowered the watermark, stop reading */
 		if (howmuch <= 0) {//当bufferevent中的evbuffer类型的input字段的数据的长度比wm_read.high还要大的话,就进入处理.
 			struct evbuffer *buf = bufev->input;
-			event_del(&bufev->ev_read); //从框架的所有队列中删除这个event实例.
+			event_del(&bufev->ev_read); //从框架的所有队列中删除这个event实例. 也就是从框架中注销这个事件.
 			evbuffer_setcb(buf,
 			    bufferevent_read_pressure_cb, bufev);//设置evbuffer类型的input示例的回调函数. arg是与这个buffer关联的bufferevent类型.
 			return;
@@ -141,10 +141,10 @@ bufferevent_readcb(int fd, short event, void *arg) //arg的类型竟然是bufferevent
 		return;
 	if (bufev->wm_read.high != 0 && len >= bufev->wm_read.high) { //如果数据的长度大于high,那么将对应的读event事件在框架的所有的队列中删除这个读event.
 		struct evbuffer *buf = bufev->input;
-		event_del(&bufev->ev_read);
+		event_del(&bufev->ev_read); //看来只要是超过了evbuffer规定的read.high那么就将这个event删除掉.
 
 		/* Now schedule a callback for us when the buffer changes */
-		evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev);//设置这个evbuffer的回调函数.
+		evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev);//设置这个evbuffer的回调函数.这个pressure_cb函数为啥要设置呢?
 	}
 
 	/* Invoke the user callback - must always be called last */
@@ -157,9 +157,9 @@ bufferevent_readcb(int fd, short event, void *arg) //arg的类型竟然是bufferevent
 	return;
 
  error:
-	(*bufev->errorcb)(bufev, what, bufev->cbarg); //出错了,就调用bufferevent的出错的回调函数.
+	(*bufev->errorcb)(bufev, what, bufev->cbarg); //出错了或者读到文件尾,就调用bufferevent的出错的回调函数.因为只有文件描述符写就绪才调用这个函数,但是却发现读到文件尾了.
 }
-//该函数就是当ev_write这event的就绪后的回调函数.函数就是将arg中的output中数据写入到fd中,如果一次没有写完,就在将ev_write注册到框架上.
+//该函数就是当ev_write这event的就绪后的回调函数.函数就是将arg中的output中数据写入到fd中,如果一次没有写完,就再将ev_write注册到框架上.
 static void
 bufferevent_writecb(int fd, short event, void *arg)
 {
@@ -383,7 +383,7 @@ bufferevent_enable(struct bufferevent *bufev, short event)
 	bufev->enabled |= event;
 	return (0);
 }
-//根据参数event的值,将对应event从框架中删除.
+//根据参数event的值,将对应event从框架中删除. 注销event事件.
 int
 bufferevent_disable(struct bufferevent *bufev, short event)
 {

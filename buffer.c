@@ -422,7 +422,7 @@ evbuffer_drain(struct evbuffer *buf, size_t len)
 
  done:
 	/* Tell someone about changes in this buffer */
-	if (buf->off != oldoff && buf->cb != NULL)
+	if (buf->off != oldoff && buf->cb != NULL)  //buf中的数据长度发生改变就调用回调函数.
 		(*buf->cb)(buf, oldoff, buf->off, buf->cbarg);
 
 }

@@ -992,7 +992,7 @@ event_queue_insert(struct event_base *base, struct event *ev, int queue)
 	ev->ev_flags |= queue;
 	switch (queue) {
 	case EVLIST_INSERTED:
-		TAILQ_INSERT_TAIL(&base->eventqueue, ev, ev_next);
+		TAILQ_INSERT_TAIL(&base->eventqueue, ev, ev_next);  //一定要注意到除了插入队列不同,还有就是指定的字段名也是不同的.所以才能将一个event对象插入到insert队列中,active队列中和信号队列中.
 		break;
 	case EVLIST_ACTIVE:
 		base->event_count_active++;

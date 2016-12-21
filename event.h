@@ -210,7 +210,7 @@ struct {								\
 
 struct event_base;
 #ifndef EVENT_NO_STRUCT
-struct event {
+struct event {  //一定要注意event结构体中有三个TAILQ_ENTRY,这三个字段,保证了一个event可以同时出现在insert队列, active队列和信号队列中.注意到这一点就能够理解整个框架关于event的移动问题!!!!
 	TAILQ_ENTRY (event) ev_next;
 	TAILQ_ENTRY (event) ev_active_next;
 	TAILQ_ENTRY (event) ev_signal_next;
@@ -230,7 +230,7 @@ struct event {
 	void (*ev_callback)(int, short, void *arg);
 	void *ev_arg;
 
-	int ev_res;		/* result passed to event callback */
+	int ev_res;		/* result passed to event callback */ //这个标志位表示这个event为什么就绪了. 是读就绪,写就绪,超时就绪.
 	int ev_flags;   //这个标志字段表示这个event
 };
 #else

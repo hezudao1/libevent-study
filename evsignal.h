@@ -50,3 +50,11 @@ int evsignal_del(struct event *);
 void evsignal_dealloc(struct event_base *);
 
 #endif /* _EVSIGNAL_H_ */
+//evsigevents中保存的event,是关注信号的event.这种event只会插入到insert队列和这个信号的队列,
+//不会插入到active队列和定时最小堆上.因为它没有优先级的要求和处理时间的要求.
+//这种event没有关注的文件描述符.所以不会被网络API真正监听.涉及到网络监听的信号处理event只有
+//一个event,就是ev_signal.
+//这一类信号event在什么时机进行处理了? 例如在epoll中, 是在epoll_dispatch中epoll_wait函数返回
+//时,不分任何状况,直接处理所有的信号event!!
+//这种event被注册到框架和注销的时机,都是先在event.c封装的函数,将event事件在insert队列中删除
+//最后在网络API封装的函数中,调用evsignal自己的函数,从evsigevents队列中删除这个event.
